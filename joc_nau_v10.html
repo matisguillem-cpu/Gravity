@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="ca">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Joc de Nau Espacial - Asteroides, Forat Negre i Clics Laterals</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #000;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-touch-callout: none;
+            touch-action: none;
+        }
+
+        #game-container {
+            width: 100%;
+            height: 100%;
+            background-image: url('FONS 1 5000x5000 FNL 16 9.jpg');
+            background-size: cover;
+            background-position: center;
+            position: relative;
+        }
+
+        #ship {
+            position: absolute;
+            width: 120px; 
+            height: 120px;
+            transform-origin: center center;
+            margin-left: -60px; 
+            margin-top: -60px;
+        }
+
+        .layer {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            background-size: contain;
+            background-repeat: no-repeat;
+            background-position: center;
+        }
+
+        #ship-image {
+            background-image: url('REF01 NAU FNL.png');
+            z-index: 2;
+        }
+
+        #fire-left {
+            background-image: url('REF01 FOC FINAL.png');
+            clip-path: inset(0 50% 0 0); 
+            z-index: 3;
+            display: none;
+        }
+
+        #fire-right {
+            background-image: url('REF01 FOC FINAL.png');
+            clip-path: inset(0 0 0 50%); 
+            z-index: 3;
+            display: none;
+        }
+
+        .asteroid {
+            position: absolute;
+            width: 80px;
+            height: 80px;
+            margin-left: -40px;
+            margin-top: -40px;
+            background-size: contain;
+            background-repeat: no-repeat;
+            background-position: center;
+            z-index: 2;
+            pointer-events: none;
+        }
+
+        #countdown-text {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 120px;
+            font-weight: bold;
+            text-shadow: 0 0 20px #ff00ff, 0 0 40px #00ffff;
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        #instructions {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: rgba(255, 255, 255, 0.8);
+            font-family: sans-serif;
+            font-size: 16px;
+            pointer-events: none;
+            z-index: 10;
+            line-height: 1.4;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <div id="instructions">
+            <strong>Controls:</strong><br>
+            • Clica o mantingues premut a l'<strong>esquerra/dreta</strong> de la pantalla (o fletxes)<br>
+            • [←] o Clic esquerre: Foc esquerre<br>
+            • [→] o Clic dret: Foc dret<br>
+            • Ambdós alhora: Avança recte<br>
+            • [ R ] Reinicia
+        </div>
+        
+        <div id="countdown-text">3</div>
+
+        <div id="ship">
+            <div id="ship-image" class="layer"></div>
+            <div id="fire-left" class="layer"></div>
+            <div id="fire-right" class="layer"></div>
+        </div>
+    </div>
+
+    <script>
+        // Evitar el menú contextual del navegador al mantenir premut al mòbil
+        window.addEventListener('contextmenu', (e) => e.preventDefault());
+
+        // Variables d'estat i física
+        let x = window.innerWidth / 2;
+        let y = window.innerHeight / 4; 
+        let vx = 0;
+        let vy = 0;
+        let angle = 0;
+        let angularVelocity = 0;
+        
+        // Constants de física
+        const gravity = 0.035;     
+        const thrust = 0.15;       
+        const turnSpeed = 0.08;    
+        const friction = 0.99;     
+        const angularFriction = 0.95; 
+        const shipMass = 1.2;
+
+        // Llista d'asteroides actius
+        const asteroids = [];
+        const asteroidImages = ['ASTEROID 1.png', 'ASTEROID 2.png', 'ASTEROID 3.png'];
+        let spawnTimerTop = null;
+        let spawnTimerSides = null;
+
+        let isPlaying = false;
+        const keys = {
+            ArrowLeft: false,
+            ArrowRight: false,
+            MouseLeft: false,
+            MouseRight: false
+        };
+
+        const containerEl = document.getElementById('game-container');
+        const shipEl = document.getElementById('ship');
+        const fireLeftEl = document.getElementById('fire-left');
+        const fireRightEl = document.getElementById('fire-right');
+        const countdownEl = document.getElementById('countdown-text');
+
+        // Events de teclat
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowLeft') keys.ArrowLeft = true;
+            if (e.key === 'ArrowRight') keys.ArrowRight = true;
+            if (e.key.toLowerCase() === 'r') resetShip();
+        });
+
+        window.addEventListener('keyup', (e) => {
+            if (e.key === 'ArrowLeft') keys.ArrowLeft = false;
+            if (e.key === 'ArrowRight') keys.ArrowRight = false;
+        });
+
+        // Events de ratolí/tàctils als costats
+        window.addEventListener('mousedown', (e) => {
+            if (e.clientX < window.innerWidth / 2) {
+                keys.MouseLeft = true;
+            } else {
+                keys.MouseRight = true;
+            }
+        });
+
+        window.addEventListener('mouseup', (e) => {
+            if (e.clientX < window.innerWidth / 2) {
+                keys.MouseLeft = false;
+            } else {
+                keys.MouseRight = false;
+            }
+        });
+
+        // Suport tàctil per a dispositius mòbils/tauletes als costats
+        window.addEventListener('touchstart', (e) => {
+            e.preventDefault(); // Evita comportaments per defecte com el scroll o gestos no desitjats
+            keys.MouseLeft = false;
+            keys.MouseRight = false;
+            for (let touch of e.touches) {
+                if (touch.clientX < window.innerWidth / 2) {
+                    keys.MouseLeft = true;
+                } else {
+                    keys.MouseRight = true;
+                }
+            }
+        }, { passive: false });
+
+        window.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            keys.MouseLeft = false;
+            keys.MouseRight = false;
+            for (let touch of e.touches) {
+                if (touch.clientX < window.innerWidth / 2) {
+                    keys.MouseLeft = true;
+                } else {
+                    keys.MouseRight = true;
+                }
+            }
+        }, { passive: false });
+
+        window.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            keys.MouseLeft = false;
+            keys.MouseRight = false;
+            for (let touch of e.touches) {
+                if (touch.clientX < window.innerWidth / 2) {
+                    keys.MouseLeft = true;
+                } else {
+                    keys.MouseRight = true;
+                }
+            }
+        }, { passive: false });
+
+        function clearAsteroids() {
+            asteroids.forEach(ast => ast.el.remove());
+            asteroids.length = 0;
+        }
+
+        function createAsteroid(astX, astY, initVx, initVy) {
+            if (!isPlaying) return;
+
+            const el = document.createElement('div');
+            el.className = 'asteroid';
+            const randomImg = asteroidImages[Math.floor(Math.random() * asteroidImages.length)];
+            el.style.backgroundImage = `url('${randomImg}')`;
+
+            const ast = {
+                el: el,
+                x: astX,
+                y: astY,
+                vx: initVx,
+                vy: initVy,
+                angle: Math.random() * 360,
+                rotSpeed: (Math.random() - 0.5) * 4,
+                radius: 35,
+                mass: 1.5
+            };
+
+            containerEl.appendChild(el);
+            asteroids.push(ast);
+        }
+
+        // Genera asteroide des de dalt (cada 1s)
+        function spawnAsteroidTop() {
+            const astX = Math.random() * window.innerWidth;
+            const astY = -40;
+            const initVx = (Math.random() - 0.5) * 1.5;
+            const initVy = Math.random() * 0.5;
+            createAsteroid(astX, astY, initVx, initVy);
+        }
+
+        // Genera asteroides des dels costats (cada 3s)
+        function spawnAsteroidSides() {
+            // Costat esquerre
+            const leftX = -40;
+            const leftY = Math.random() * (window.innerHeight * 0.6);
+            const leftVx = Math.random() * 1.5 + 0.5;
+            const leftVy = Math.random() * 0.5;
+            createAsteroid(leftX, leftY, leftVx, leftVy);
+
+            // Costat dret
+            const rightX = window.innerWidth + 40;
+            const rightY = Math.random() * (window.innerHeight * 0.6);
+            const rightVx = -(Math.random() * 1.5 + 0.5);
+            const rightVy = Math.random() * 0.5;
+            createAsteroid(rightX, rightY, rightVx, rightVy);
+        }
+
+        function resetShip() {
+            x = window.innerWidth / 2;
+            y = window.innerHeight / 4; 
+            vx = 0;
+            vy = 0;
+            angle = 0;
+            angularVelocity = 0;
+            clearAsteroids();
+            updateShipTransform();
+        }
+
+        function updateShipTransform() {
+            shipEl.style.transform = `translate(${x}px, ${y}px) rotate(${angle}deg)`;
+        }
+
+        function gameLoop() {
+            if (isPlaying) {
+                let leftActive = keys.ArrowLeft || keys.MouseLeft;
+                let rightActive = keys.ArrowRight || keys.MouseRight;
+
+                let thrustLeft = false;
+                let thrustRight = false;
+
+                if (leftActive && rightActive) {
+                    thrustLeft = true;
+                    thrustRight = true;
+                    const radians = (angle - 90) * (Math.PI / 180);
+                    vx += Math.cos(radians) * thrust;
+                    vy += Math.sin(radians) * thrust;
+                } 
+                else if (leftActive) {
+                    thrustLeft = true;
+                    angularVelocity += turnSpeed;
+                    
+                    const radians = (angle - 90) * (Math.PI / 180);
+                    vx += Math.cos(radians) * (thrust * 0.5);
+                    vy += Math.sin(radians) * (thrust * 0.5);
+                } 
+                else if (rightActive) {
+                    thrustRight = true;
+                    angularVelocity -= turnSpeed;
+                    
+                    const radians = (angle - 90) * (Math.PI / 180);
+                    vx += Math.cos(radians) * (thrust * 0.5);
+                    vy += Math.sin(radians) * (thrust * 0.5);
+                }
+
+                fireLeftEl.style.display = thrustLeft ? 'block' : 'none';
+                fireRightEl.style.display = thrustRight ? 'block' : 'none';
+
+                // Posició del forat negre
+                const blackHoleX = window.innerWidth / 2;
+                const blackHoleY = window.innerHeight * 0.9;
+
+                // Gravetat nau
+                const dxShip = blackHoleX - x;
+                const dyShip = blackHoleY - y;
+                const distShip = Math.sqrt(dxShip * dxShip + dyShip * dyShip);
+
+                if (distShip > 0) {
+                    vx += (dxShip / distShip) * gravity;
+                    vy += (dyShip / distShip) * gravity;
+                }
+
+                x += vx;
+                y += vy;
+                angle += angularVelocity;
+
+                vx *= friction;
+                vy *= friction;
+                angularVelocity *= angularFriction;
+
+                // 1. Col·lisions entre els propis asteroides (amb rebot suau)
+                const asteroidRestitution = 0.35; 
+
+                for (let i = 0; i < asteroids.length; i++) {
+                    for (let j = i + 1; j < asteroids.length; j++) {
+                        const a1 = asteroids[i];
+                        const a2 = asteroids[j];
+
+                        const dx = a2.x - a1.x;
+                        const dy = a2.y - a1.y;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        const minDist = a1.radius + a2.radius;
+
+                        if (dist < minDist && dist > 0) {
+                            const nx = dx / dist;
+                            const ny = dy / dist;
+
+                            const overlap = minDist - dist;
+                            a1.x -= nx * overlap * 0.5;
+                            a1.y -= ny * overlap * 0.5;
+                            a2.x += nx * overlap * 0.5;
+                            a2.y += ny * overlap * 0.5;
+
+                            const kx = a1.vx - a2.vx;
+                            const ky = a1.vy - a2.vy;
+                            const p = 2 * (nx * kx + ny * ky) / (a1.mass + a2.mass);
+
+                            a1.vx -= p * a2.mass * nx * asteroidRestitution;
+                            a1.vy -= p * a2.mass * ny * asteroidRestitution;
+                            a2.vx += p * a1.mass * nx * asteroidRestitution;
+                            a2.vy += p * a1.mass * ny * asteroidRestitution;
+                        }
+                    }
+                }
+
+                // 2. Actualització i col·lisió d'asteroides amb la nau/escenari
+                const shipRadius = 40;
+
+                for (let i = asteroids.length - 1; i >= 0; i--) {
+                    const ast = asteroids[i];
+
+                    const dxAst = blackHoleX - ast.x;
+                    const dyAst = blackHoleY - ast.y;
+                    const distAst = Math.sqrt(dxAst * dxAst + dyAst * dyAst);
+
+                    if (distAst > 0) {
+                        ast.vx += (dxAst / distAst) * (gravity * 1.5);
+                        ast.vy += (dyAst / distAst) * (gravity * 1.5);
+                    }
+
+                    ast.x += ast.vx;
+                    ast.y += ast.vy;
+                    ast.angle += ast.rotSpeed;
+
+                    // Col·lisió entre la nau i l'asteroide
+                    const dShipAstX = x - ast.x;
+                    const dShipAstY = y - ast.y;
+                    const distBetween = Math.sqrt(dShipAstX * dShipAstX + dShipAstY * dShipAstY);
+                    const minDist = shipRadius + ast.radius;
+
+                    if (distBetween < minDist && distBetween > 0) {
+                        const nx = dShipAstX / distBetween;
+                        const ny = dShipAstY / distBetween;
+
+                        const overlap = minDist - distBetween;
+                        x += nx * overlap * 0.5;
+                        y += ny * overlap * 0.5;
+                        ast.x -= nx * overlap * 0.5;
+                        ast.y -= ny * overlap * 0.5;
+
+                        const kx = vx - ast.vx;
+                        const ky = vy - ast.vy;
+                        const p = 2 * (nx * kx + ny * ky) / (shipMass + ast.mass);
+
+                        const shipRestitution = 0.85;
+                        vx -= p * ast.mass * nx * shipRestitution;
+                        vy -= p * ast.mass * ny * shipRestitution;
+                        ast.vx += p * shipMass * nx * shipRestitution;
+                        ast.vy += p * shipMass * ny * shipRestitution;
+                    }
+
+                    // Renderitzar asteroide
+                    ast.el.style.transform = `translate(${ast.x}px, ${ast.y}px) rotate(${ast.angle}deg)`;
+
+                    if (distAst < 50 || ast.y > window.innerHeight + 100 || ast.x < -100 || ast.x > window.innerWidth + 100) {
+                        ast.el.remove();
+                        asteroids.splice(i, 1);
+                    }
+                }
+
+                // Marges nau
+                if (x < -60) x = window.innerWidth + 60;
+                if (x > window.innerWidth + 60) x = -60;
+                if (y < -60) y = window.innerHeight + 60;
+                if (y > window.innerHeight) {
+                    y = window.innerHeight;
+                    vy *= 0.5;
+                    vx *= 0.9;
+                }
+
+                updateShipTransform();
+            }
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        function startCountdown() {
+            let count = 3;
+            resetShip();
+            
+            if (spawnTimerTop) clearInterval(spawnTimerTop);
+            if (spawnTimerSides) clearInterval(spawnTimerSides);
+
+            const countInterval = setInterval(() => {
+                count--;
+                if (count > 0) {
+                    countdownEl.innerText = count;
+                } else if (count === 0) {
+                    countdownEl.innerText = "GO!";
+                } else {
+                    clearInterval(countInterval);
+                    countdownEl.style.display = 'none';
+                    isPlaying = true;
+
+                    // Asteroides des de dalt cada 1 segon
+                    spawnTimerTop = setInterval(spawnAsteroidTop, 1000);
+
+                    // Asteroides des dels costats cada 3 segons
+                    spawnTimerSides = setInterval(spawnAsteroidSides, 3000);
+                }
+            }, 1000);
+        }
+
+        updateShipTransform();
+        startCountdown();
+        requestAnimationFrame(gameLoop);
+
+    </script>
+</body>
+</html>
