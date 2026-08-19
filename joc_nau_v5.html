@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="ca">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Joc de Nau Espacial - Controls Tàctils</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #000;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: none;
+        }
+
+        /* Fons de la galàxia */
+        #game-container {
+            width: 100%;
+            height: 100%;
+            background-image: url('FONS 1 5000x5000 FNL 16 9.jpg');
+            background-size: cover;
+            background-position: center;
+            position: relative;
+        }
+
+        /* Contenidor de la nau */
+        #ship {
+            position: absolute;
+            width: 120px; 
+            height: 120px;
+            transform-origin: center center;
+            margin-left: -60px; 
+            margin-top: -60px;
+        }
+
+        /* Capes */
+        .layer {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            background-size: contain;
+            background-repeat: no-repeat;
+            background-position: center;
+        }
+
+        #ship-image {
+            background-image: url('REF01 NAU FNL.png');
+            z-index: 2;
+        }
+
+        #fire-left {
+            background-image: url('REF01 FOC FINAL.png');
+            clip-path: inset(0 50% 0 0); 
+            z-index: 3;
+            display: none;
+        }
+
+        #fire-right {
+            background-image: url('REF01 FOC FINAL.png');
+            clip-path: inset(0 0 0 50%); 
+            z-index: 3;
+            display: none;
+        }
+
+        /* Text del compte enrere */
+        #countdown-text {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 120px;
+            font-weight: bold;
+            text-shadow: 0 0 20px #ff00ff, 0 0 40px #00ffff;
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        /* Instruccions */
+        #instructions {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: rgba(255, 255, 255, 0.7);
+            font-family: sans-serif;
+            font-size: 16px;
+            pointer-events: none;
+            z-index: 10;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <div id="instructions">
+            Controls:<br>
+            • Prem meitat esquerra: Foc esquerre<br>
+            • Prem meitat dreta: Foc dret<br>
+            • Prem ambdós costats: Avança recte<br>
+            • Tecla [R]: Reinicia
+        </div>
+        
+        <div id="countdown-text">3</div>
+
+        <div id="ship">
+            <div id="ship-image" class="layer"></div>
+            <div id="fire-left" class="layer"></div>
+            <div id="fire-right" class="layer"></div>
+        </div>
+    </div>
+
+    <script>
+        // Variables d'estat i física
+        let x = window.innerWidth / 2;
+        let y = window.innerHeight / 4; 
+        let vx = 0;
+        let vy = 0;
+        let angle = 0;
+        let angularVelocity = 0;
+        
+        // Constants de física
+        const gravity = 0.035;     
+        const thrust = 0.15;       
+        const turnSpeed = 0.08;    
+        const friction = 0.99;     
+        const angularFriction = 0.95; 
+
+        let isPlaying = false;
+        const keys = {
+            ArrowLeft: false,
+            ArrowRight: false
+        };
+
+        const shipEl = document.getElementById('ship');
+        const fireLeftEl = document.getElementById('fire-left');
+        const fireRightEl = document.getElementById('fire-right');
+        const countdownEl = document.getElementById('countdown-text');
+
+        // ==========================================
+        // CONTROLS TÀCTILS I DE RATOLÍ
+        // ==========================================
+        function handleTouches(e) {
+            if (e.type !== 'keyup' && e.type !== 'keydown') {
+                e.preventDefault();
+            }
+            
+            keys.ArrowLeft = false;
+            keys.ArrowRight = false;
+            
+            const midX = window.innerWidth / 2;
+
+            if (e.touches && e.touches.length > 0) {
+                for (let i = 0; i < e.touches.length; i++) {
+                    if (e.touches[i].clientX < midX) {
+                        keys.ArrowLeft = true;
+                    } else {
+                        keys.ArrowRight = true;
+                    }
+                }
+            }
+        }
+
+        let isMouseDown = false;
+        function handleMouse(e) {
+            const midX = window.innerWidth / 2;
+            keys.ArrowLeft = isMouseDown && (e.clientX < midX);
+            keys.ArrowRight = isMouseDown && (e.clientX >= midX);
+        }
+
+        // Esdeveniments de pantalla tàctil
+        window.addEventListener('touchstart', handleTouches, { passive: false });
+        window.addEventListener('touchmove', handleTouches, { passive: false });
+        window.addEventListener('touchend', handleTouches, { passive: false });
+        window.addEventListener('touchcancel', handleTouches, { passive: false });
+
+        // Esdeveniments de ratolí (per provar a l'ordinador clicant)
+        window.addEventListener('mousedown', (e) => { isMouseDown = true; handleMouse(e); });
+        window.addEventListener('mouseup', () => { isMouseDown = false; keys.ArrowLeft = false; keys.ArrowRight = false; });
+        window.addEventListener('mousemove', (e) => { if (isMouseDown) handleMouse(e); });
+
+        // Mantenim la tecla R per reiniciar i fletxes com a opció
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowLeft') keys.ArrowLeft = true;
+            if (e.key === 'ArrowRight') keys.ArrowRight = true;
+            if (e.key.toLowerCase() === 'r') resetShip();
+        });
+
+        window.addEventListener('keyup', (e) => {
+            if (e.key === 'ArrowLeft') keys.ArrowLeft = false;
+            if (e.key === 'ArrowRight') keys.ArrowRight = false;
+        });
+
+        function resetShip() {
+            x = window.innerWidth / 2;
+            y = window.innerHeight / 4; 
+            vx = 0;
+            vy = 0;
+            angle = 0;
+            angularVelocity = 0;
+            updateShipTransform();
+        }
+
+        function updateShipTransform() {
+            shipEl.style.transform = `translate(${x}px, ${y}px) rotate(${angle}deg)`;
+        }
+
+        function gameLoop() {
+            if (isPlaying) {
+                let thrustLeft = false;
+                let thrustRight = false;
+
+                if (keys.ArrowLeft && keys.ArrowRight) {
+                    thrustLeft = true;
+                    thrustRight = true;
+                    const radians = (angle - 90) * (Math.PI / 180);
+                    vx += Math.cos(radians) * thrust;
+                    vy += Math.sin(radians) * thrust;
+                } 
+                else if (keys.ArrowLeft) {
+                    thrustLeft = true;
+                    angularVelocity += turnSpeed;
+                    
+                    const radians = (angle - 90) * (Math.PI / 180);
+                    vx += Math.cos(radians) * (thrust * 0.5);
+                    vy += Math.sin(radians) * (thrust * 0.5);
+                } 
+                else if (keys.ArrowRight) {
+                    thrustRight = true;
+                    angularVelocity -= turnSpeed;
+                    
+                    const radians = (angle - 90) * (Math.PI / 180);
+                    vx += Math.cos(radians) * (thrust * 0.5);
+                    vy += Math.sin(radians) * (thrust * 0.5);
+                }
+
+                fireLeftEl.style.display = thrustLeft ? 'block' : 'none';
+                fireRightEl.style.display = thrustRight ? 'block' : 'none';
+
+                // Atracció del forat negre
+                const blackHoleX = window.innerWidth / 2;
+                const blackHoleY = window.innerHeight * 0.9;
+
+                const dx = blackHoleX - x;
+                const dy = blackHoleY - y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+
+                if (distance > 0) {
+                    vx += (dx / distance) * gravity;
+                    vy += (dy / distance) * gravity;
+                }
+
+                x += vx;
+                y += vy;
+                angle += angularVelocity;
+
+                vx *= friction;
+                vy *= friction;
+                angularVelocity *= angularFriction;
+
+                if (x < -60) x = window.innerWidth + 60;
+                if (x > window.innerWidth + 60) x = -60;
+                
+                if (y < -60) y = window.innerHeight + 60;
+                if (y > window.innerHeight) {
+                    y = window.innerHeight;
+                    vy *= 0.5;
+                    vx *= 0.9;
+                }
+
+                updateShipTransform();
+            }
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        function startCountdown() {
+            let count = 3;
+            resetShip();
+            
+            const countInterval = setInterval(() => {
+                count--;
+                if (count > 0) {
+                    countdownEl.innerText = count;
+                } else if (count === 0) {
+                    countdownEl.innerText = "GO!";
+                } else {
+                    clearInterval(countInterval);
+                    countdownEl.style.display = 'none';
+                    isPlaying = true;
+                }
+            }, 1000);
+        }
+
+        updateShipTransform();
+        startCountdown();
+        requestAnimationFrame(gameLoop);
+
+    </script>
+</body>
+</html>
