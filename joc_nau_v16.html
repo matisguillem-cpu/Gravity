@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="ca">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Joc de Nau Espacial - Càmera Polar i Forat Negre</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #000;
+        }
+
+        #game-container {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            overflow: hidden;
+        }
+
+        /* Nou contenidor per al fons que girarà */
+        #bg-image {
+            position: absolute;
+            width: 5000px;
+            height: 5000px;
+            /* Se centrarà dinàmicament des de JavaScript a la posició del forat negre */
+            left: 50%; 
+            top: 90%;  
+            margin-left: -2500px;
+            margin-top: -2500px;
+            background-image: url('FONS 1 5000x5000 FNL.jpg');
+            
+            /* CANVI CLAU: Reduïm la mida de la imatge per "allunyar" el forat negre */
+            background-size: 2200px; 
+            background-repeat: no-repeat;
+            
+            background-position: center;
+            transform-origin: center center;
+            z-index: 1;
+        }
+
+        #ship {
+            position: absolute;
+            width: 120px; 
+            height: 120px;
+            transform-origin: center center;
+            margin-left: -60px; 
+            margin-top: -60px;
+            z-index: 5;
+        }
+
+        .layer {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            background-size: contain;
+            background-repeat: no-repeat;
+            background-position: center;
+        }
+
+        #ship-image {
+            background-image: url('REF01 NAU FNL.png');
+            z-index: 6;
+        }
+
+        #fire-left {
+            background-image: url('REF01 FOC FINAL.png');
+            clip-path: inset(0 50% 0 0); 
+            z-index: 7;
+            display: none;
+        }
+
+        #fire-right {
+            background-image: url('REF01 FOC FINAL.png');
+            clip-path: inset(0 0 0 50%); 
+            z-index: 7;
+            display: none;
+        }
+
+        .asteroid {
+            position: absolute;
+            width: 80px;
+            height: 80px;
+            margin-left: -40px;
+            margin-top: -40px;
+            background-size: contain;
+            background-repeat: no-repeat;
+            background-position: center;
+            z-index: 4;
+            pointer-events: none;
+        }
+
+        #countdown-text {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 120px;
+            font-weight: bold;
+            text-shadow: 0 0 20px #ff00ff, 0 0 40px #00ffff;
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        #instructions {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: rgba(255, 255, 255, 0.7);
+            font-family: sans-serif;
+            font-size: 16px;
+            pointer-events: none;
+            z-index: 10;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <!-- Imatge de fons que rotarà -->
+        <div id="bg-image"></div>
+        
+        <div id="instructions">
+            Controls:<br>
+            [←] Foc esquerre (gira a la dreta)<br>
+            [→] Foc dret (gira a l'esquerra)<br>
+            [←] + [→] Avança recte<br>
+            [ R ] Reinicia
+        </div>
+        
+        <div id="countdown-text">3</div>
+
+        <div id="ship">
+            <div id="ship-image" class="layer"></div>
+            <div id="fire-left" class="layer"></div>
+            <div id="fire-right" class="layer"></div>
+        </div>
+    </div>
+
+    <script>
+        // Coordenades del Forat Negre (Fixes en l'espai del Món i Pantalla)
+        let worldBH_x = window.innerWidth / 2;
+        let worldBH_y = window.innerHeight * 0.9;
+        
+        // Variables d'estat i física
+        let x = worldBH_x;
+        let y = worldBH_y - window.innerHeight * 0.65; 
+        let vx = 0;
+        let vy = 0;
+        let angle = 0;
+        let angularVelocity = 0;
+        
+        // Constants de física
+        const gravity = 0.035;     
+        const thrust = 0.15;       
+        const turnSpeed = 0.08;    
+        const friction = 0.99;     
+        const angularFriction = 0.95; 
+        const shipMass = 1.2;
+
+        // Llista d'asteroides actius
+        const asteroids = [];
+        const asteroidImages = ['ASTEROID 1-.png', 'ASTEROID 2-.png', 'ASTEROID 3-.png'];
+        let spawnTimerTop = null;
+        let spawnTimerSides = null;
+
+        let isPlaying = false;
+        const keys = {
+            ArrowLeft: false,
+            ArrowRight: false
+        };
+
+        const containerEl = document.getElementById('game-container');
+        const shipEl = document.getElementById('ship');
+        const fireLeftEl = document.getElementById('fire-left');
+        const fireRightEl = document.getElementById('fire-right');
+        const countdownEl = document.getElementById('countdown-text');
+        const bgImageEl = document.getElementById('bg-image');
+
+        // Assegurar que el fons està centrat on toca en cas de canvi de mida de pantalla
+        function updateBGCenter() {
+            worldBH_x = window.innerWidth / 2;
+            worldBH_y = window.innerHeight * 0.9;
+            bgImageEl.style.left = `${worldBH_x}px`;
+            bgImageEl.style.top = `${worldBH_y}px`;
+        }
+        window.addEventListener('resize', updateBGCenter);
+        updateBGCenter();
+
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowLeft') keys.ArrowLeft = true;
+            if (e.key === 'ArrowRight') keys.ArrowRight = true;
+            if (e.key.toLowerCase() === 'r') resetShip();
+        });
+
+        window.addEventListener('keyup', (e) => {
+            if (e.key === 'ArrowLeft') keys.ArrowLeft = false;
+            if (e.key === 'ArrowRight') keys.ArrowRight = false;
+        });
+
+        function clearAsteroids() {
+            asteroids.forEach(ast => ast.el.remove());
+            asteroids.length = 0;
+        }
+
+        function createAsteroid(astX, astY, initVx, initVy) {
+            if (!isPlaying) return;
+
+            const el = document.createElement('div');
+            el.className = 'asteroid';
+            const randomImg = asteroidImages[Math.floor(Math.random() * asteroidImages.length)];
+            el.style.backgroundImage = `url('${randomImg}')`;
+
+            const ast = {
+                el: el,
+                x: astX,
+                y: astY,
+                vx: initVx,
+                vy: initVy,
+                angle: Math.random() * 360,
+                rotSpeed: (Math.random() - 0.5) * 4,
+                radius: 35,
+                mass: 1.5
+            };
+
+            containerEl.appendChild(el);
+            asteroids.push(ast);
+        }
+
+        // Genera asteroide relatiu a la posició de la nau
+        function spawnAsteroidTop() {
+            const dxShip = x - worldBH_x;
+            const dyShip = y - worldBH_y;
+            const distShip = Math.sqrt(dxShip * dxShip + dyShip * dyShip);
+            const thetaShip = Math.atan2(dyShip, dxShip);
+            
+            const r = distShip + window.innerHeight;
+            const angleOffset = (Math.random() - 0.5) * 0.5; 
+            const spawnTheta = thetaShip + angleOffset;
+            
+            const astX = worldBH_x + r * Math.cos(spawnTheta);
+            const astY = worldBH_y + r * Math.sin(spawnTheta);
+            
+            const vxAst = -Math.cos(spawnTheta) * (Math.random() * 1.5 + 0.5);
+            const vyAst = -Math.sin(spawnTheta) * (Math.random() * 1.5 + 0.5);
+            
+            createAsteroid(astX, astY, vxAst, vyAst);
+        }
+
+        function spawnAsteroidSides() {
+            const dxShip = x - worldBH_x;
+            const dyShip = y - worldBH_y;
+            const distShip = Math.sqrt(dxShip * dxShip + dyShip * dyShip);
+            const thetaShip = Math.atan2(dyShip, dxShip);
+            
+            const r = distShip + window.innerWidth * 0.5;
+
+            // Esquerra
+            const thetaL = thetaShip - 1.0; 
+            const vxL = -Math.cos(thetaL) * 1.5;
+            const vyL = -Math.sin(thetaL) * 1.5;
+            createAsteroid(worldBH_x + r * Math.cos(thetaL), worldBH_y + r * Math.sin(thetaL), vxL, vyL);
+
+            // Dreta
+            const thetaR = thetaShip + 1.0; 
+            const vxR = -Math.cos(thetaR) * 1.5;
+            const vyR = -Math.sin(thetaR) * 1.5;
+            createAsteroid(worldBH_x + r * Math.cos(thetaR), worldBH_y + r * Math.sin(thetaR), vxR, vyR);
+        }
+
+        function resetShip() {
+            x = worldBH_x;
+            y = worldBH_y - window.innerHeight * 0.65;
+            vx = 0;
+            vy = 0;
+            angle = 0;
+            angularVelocity = 0;
+            clearAsteroids();
+        }
+
+        function gameLoop() {
+            if (isPlaying) {
+                let thrustLeft = false;
+                let thrustRight = false;
+
+                if (keys.ArrowLeft && keys.ArrowRight) {
+                    thrustLeft = true;
+                    thrustRight = true;
+                    const radians = (angle - 90) * (Math.PI / 180);
+                    vx += Math.cos(radians) * thrust;
+                    vy += Math.sin(radians) * thrust;
+                } 
+                else if (keys.ArrowLeft) {
+                    thrustLeft = true;
+                    angularVelocity += turnSpeed;
+                    
+                    const radians = (angle - 90) * (Math.PI / 180);
+                    vx += Math.cos(radians) * (thrust * 0.5);
+                    vy += Math.sin(radians) * (thrust * 0.5);
+                } 
+                else if (keys.ArrowRight) {
+                    thrustRight = true;
+                    angularVelocity -= turnSpeed;
+                    
+                    const radians = (angle - 90) * (Math.PI / 180);
+                    vx += Math.cos(radians) * (thrust * 0.5);
+                    vy += Math.sin(radians) * (thrust * 0.5);
+                }
+
+                fireLeftEl.style.display = thrustLeft ? 'block' : 'none';
+                fireRightEl.style.display = thrustRight ? 'block' : 'none';
+
+                // Gravetat nau
+                const dxShip = worldBH_x - x;
+                const dyShip = worldBH_y - y;
+                const distShip = Math.sqrt(dxShip * dxShip + dyShip * dyShip);
+
+                if (distShip > 0) {
+                    vx += (dxShip / distShip) * gravity;
+                    vy += (dyShip / distShip) * gravity;
+                }
+
+                x += vx;
+                y += vy;
+                angle += angularVelocity;
+
+                vx *= friction;
+                vy *= friction;
+                angularVelocity *= angularFriction;
+                
+                // Rebot al Forat Negre per no perdre-s'hi dins del tot
+                if (distShip < 60) {
+                    const nx = dxShip / distShip;
+                    const ny = dyShip / distShip;
+                    x = worldBH_x - nx * 60;
+                    y = worldBH_y - ny * 60;
+                    vx *= -0.5;
+                    vy *= -0.5;
+                }
+
+                // Càlcul de la rotació de la càmera polar
+                const thetaShip = Math.atan2(-dyShip, -dxShip); 
+                const alpha = -Math.PI / 2 - thetaShip;
+
+                // Aplicar rotació al fons
+                bgImageEl.style.transform = `rotate(${alpha}rad)`;
+
+                // Renderitzar la Nau
+                const shipScreenY = worldBH_y - distShip;
+                shipEl.style.transform = `translate(${worldBH_x}px, ${shipScreenY}px) rotate(${angle + (alpha * 180 / Math.PI)}deg)`;
+
+                // Físiques Asteroides
+                const asteroidRestitution = 0.35; 
+                for (let i = 0; i < asteroids.length; i++) {
+                    for (let j = i + 1; j < asteroids.length; j++) {
+                        const a1 = asteroids[i];
+                        const a2 = asteroids[j];
+
+                        const dx = a2.x - a1.x;
+                        const dy = a2.y - a1.y;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        const minDist = a1.radius + a2.radius;
+
+                        if (dist < minDist && dist > 0) {
+                            const nx = dx / dist;
+                            const ny = dy / dist;
+
+                            const overlap = minDist - dist;
+                            a1.x -= nx * overlap * 0.5;
+                            a1.y -= ny * overlap * 0.5;
+                            a2.x += nx * overlap * 0.5;
+                            a2.y += ny * overlap * 0.5;
+
+                            const kx = a1.vx - a2.vx;
+                            const ky = a1.vy - a2.vy;
+                            const p = 2 * (nx * kx + ny * ky) / (a1.mass + a2.mass);
+
+                            a1.vx -= p * a2.mass * nx * asteroidRestitution;
+                            a1.vy -= p * a2.mass * ny * asteroidRestitution;
+                            a2.vx += p * a1.mass * nx * asteroidRestitution;
+                            a2.vy += p * a1.mass * ny * asteroidRestitution;
+                        }
+                    }
+                }
+
+                const shipRadius = 40;
+
+                for (let i = asteroids.length - 1; i >= 0; i--) {
+                    const ast = asteroids[i];
+
+                    const dxAst = worldBH_x - ast.x;
+                    const dyAst = worldBH_y - ast.y;
+                    const distAst = Math.sqrt(dxAst * dxAst + dyAst * dyAst);
+
+                    if (distAst > 0) {
+                        // Si està a menys de 180 píxels, la gravetat augmenta dràsticament
+                        let currentGravity = gravity * 1.5;
+                        if (distAst < 180) {
+                            currentGravity = gravity * 15; // Succió molt forta a prop del centre
+                        }
+                        
+                        ast.vx += (dxAst / distAst) * currentGravity;
+                        ast.vy += (dyAst / distAst) * currentGravity;
+                    }
+
+                    ast.x += ast.vx;
+                    ast.y += ast.vy;
+                    ast.angle += ast.rotSpeed;
+
+                    // Col·lisió entre la nau i l'asteroide
+                    const dShipAstX = x - ast.x;
+                    const dShipAstY = y - ast.y;
+                    const distBetween = Math.sqrt(dShipAstX * dShipAstX + dShipAstY * dShipAstY);
+                    const minDist = shipRadius + ast.radius;
+
+                    if (distBetween < minDist && distBetween > 0) {
+                        const nx = dShipAstX / distBetween;
+                        const ny = dShipAstY / distBetween;
+
+                        const overlap = minDist - distBetween;
+                        x += nx * overlap * 0.5;
+                        y += ny * overlap * 0.5;
+                        ast.x -= nx * overlap * 0.5;
+                        ast.y -= ny * overlap * 0.5;
+
+                        const kx = vx - ast.vx;
+                        const ky = vy - ast.vy;
+                        const p = 2 * (nx * kx + ny * ky) / (shipMass + ast.mass);
+
+                        const shipRestitution = 0.85;
+                        vx -= p * ast.mass * nx * shipRestitution;
+                        vy -= p * ast.mass * ny * shipRestitution;
+                        ast.vx += p * shipMass * nx * shipRestitution;
+                        ast.vy += p * shipMass * ny * shipRestitution;
+                    }
+
+                    // Renderitzar asteroide amb la càmera polar
+                    const astDx = ast.x - worldBH_x;
+                    const astDy = ast.y - worldBH_y;
+                    const astR = Math.sqrt(astDx*astDx + astDy*astDy);
+                    const astTheta = Math.atan2(astDy, astDx);
+                    const screenTheta = astTheta + alpha;
+                    
+                    const screenX = worldBH_x + astR * Math.cos(screenTheta);
+                    const screenY = worldBH_y + astR * Math.sin(screenTheta);
+
+                    ast.el.style.transform = `translate(${screenX}px, ${screenY}px) rotate(${ast.angle + (alpha * 180 / Math.PI)}deg)`;
+
+                    // Eliminació (Si s'absorbeix o s'allunya massa de la nau)
+                    if (distAst < 110 || distBetween > window.innerHeight * 2.5) {
+                        ast.el.remove();
+                        asteroids.splice(i, 1);
+                    }
+                }
+            }
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        function startCountdown() {
+            let count = 3;
+            resetShip();
+            
+            if (spawnTimerTop) clearInterval(spawnTimerTop);
+            if (spawnTimerSides) clearInterval(spawnTimerSides);
+
+            const countInterval = setInterval(() => {
+                count--;
+                if (count > 0) {
+                    countdownEl.innerText = count;
+                } else if (count === 0) {
+                    countdownEl.innerText = "GO!";
+                } else {
+                    clearInterval(countInterval);
+                    countdownEl.style.display = 'none';
+                    isPlaying = true;
+
+                    spawnTimerTop = setInterval(spawnAsteroidTop, 1000);
+                    spawnTimerSides = setInterval(spawnAsteroidSides, 3000);
+                }
+            }, 1000);
+        }
+
+        startCountdown();
+        requestAnimationFrame(gameLoop);
+
+    </script>
+</body>
+</html>
